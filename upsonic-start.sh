@@ -20,15 +20,122 @@ INFO="${BLUE}ℹ${NC}"
 # Banner
 print_banner() {
     clear
+    echo ""
     echo -e "${CYAN}${BOLD}"
     cat << "EOF"
-╦ ╦┌─┐┌─┐┌─┐┌┐┌┬┌─┐  ╔═╗┌─┐┌─┐┌┐┌┌┬┐╔═╗╔═╗
-║ ║├─┘└─┐│ ││││││    ╠═╣│ ┬├┤ │││ │ ║ ║╚═╗
-╚═╝┴  └─┘└─┘┘└┘┴└─┘  ╩ ╩└─┘└─┘┘└┘ ┴ ╚═╝╚═╝
+██╗   ██╗██████╗ ███████╗ ██████╗ ███╗   ██╗██╗ ██████╗
+██║   ██║██╔══██╗██╔════╝██╔═══██╗████╗  ██║██║██╔════╝
+██║   ██║██████╔╝███████╗██║   ██║██╔██╗ ██║██║██║
+██║   ██║██╔═══╝ ╚════██║██║   ██║██║╚██╗██║██║██║
+╚██████╔╝██║     ███████║╚██████╔╝██║ ╚████║██║╚██████╗
+ ╚═════╝ ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝ ╚═════╝
 EOF
     echo -e "${NC}"
-    echo -e "${BOLD}            Setup Wizard v1.0${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD} █████╗  ██████╗ ███████╗███╗   ██╗████████╗ ██████╗ ███████╗${NC}"
+    echo -e "${BOLD}██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔═══██╗██╔════╝${NC}"
+    echo -e "${BOLD}███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██║   ██║███████╗${NC}"
+    echo -e "${BOLD}██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██║   ██║╚════██║${NC}"
+    echo -e "${BOLD}██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ╚██████╔╝███████║${NC}"
+    echo -e "${BOLD}╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ ╚══════╝${NC}"
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+}
+
+# Delete function
+delete_platform() {
+    print_banner
+    echo -e "${RED}${BOLD}⚠  WARNING: DESTRUCTIVE OPERATION  ⚠${NC}"
+    echo ""
+    echo -e "${YELLOW}This will completely remove Upsonic Platform:${NC}"
+    echo -e "  ${RED}•${NC} All Docker containers"
+    echo -e "  ${RED}•${NC} All Docker volumes (including databases)"
+    echo -e "  ${RED}•${NC} All Docker networks"
+    echo -e "  ${RED}•${NC} Configuration files (.env)"
+    echo ""
+    echo -e "${RED}${BOLD}THIS ACTION CANNOT BE UNDONE!${NC}"
+    echo ""
+
+    if ! confirm "Are you absolutely sure you want to delete everything?" "n"; then
+        print_info "Deletion cancelled"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "${YELLOW}Last chance to cancel!${NC}"
+    if ! confirm "Type 'yes' to confirm deletion" "n"; then
+        print_info "Deletion cancelled"
+        exit 0
+    fi
+
+    print_step "Deleting Upsonic Platform"
+
+    # Find agent containers
+    print_info "Finding deployed agent containers..."
+    AGENT_CONTAINERS=$(docker ps -a --filter "name=upsonic-" --format "{{.Names}}" | grep -v -E "upsonic-api|upsonic-db|upsonic-redis|upsonic-celery|ams-project|ams-db" || true)
+
+    if [ -n "$AGENT_CONTAINERS" ]; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}The following agent containers will be deleted:${NC}"
+        echo ""
+        echo "$AGENT_CONTAINERS" | while read container; do
+            echo -e "  ${RED}•${NC} $container"
+        done
+        echo ""
+
+        if ! confirm "Delete these agent containers?" "y"; then
+            print_info "Skipping agent containers deletion"
+            AGENT_CONTAINERS=""
+        fi
+    else
+        print_info "No agent containers found"
+    fi
+
+    # Stop and remove Platform containers
+    print_info "Stopping Platform containers..."
+    if [ -f "compose-demo.yml" ]; then
+        docker compose -f compose-demo.yml down --remove-orphans 2>/dev/null || true
+    fi
+    if [ -f "docker-compose.yml" ]; then
+        docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null || true
+    fi
+    print_success "Platform containers stopped"
+
+    # Stop and remove agent containers
+    if [ -n "$AGENT_CONTAINERS" ]; then
+        print_info "Stopping and removing agent containers..."
+        echo "$AGENT_CONTAINERS" | while read container; do
+            docker stop "$container" 2>/dev/null || true
+            docker rm "$container" 2>/dev/null || true
+        done
+        print_success "Agent containers removed"
+    fi
+
+    # Remove volumes
+    print_info "Removing volumes..."
+    docker volume rm platform_upsonic-db-data 2>/dev/null || true
+    docker volume rm platform_redis_data 2>/dev/null || true
+    docker volume rm platform_ams-db-data 2>/dev/null || true
+    docker volume rm platform_ams-repos-data 2>/dev/null || true
+    print_success "Volumes removed"
+
+    # Remove networks
+    print_info "Removing networks..."
+    docker network rm platform_upsonic-network 2>/dev/null || true
+    print_success "Networks removed"
+
+    # Backup and remove .env
+    if [ -f ".env" ]; then
+        print_info "Backing up .env file..."
+        BACKUP_NAME=".env.backup.$(date +%Y%m%d_%H%M%S)"
+        mv .env "$BACKUP_NAME"
+        print_success "Configuration backed up to $BACKUP_NAME"
+    fi
+
+    echo ""
+    print_success "Upsonic Platform has been completely removed!"
+    echo ""
+    print_info "To reinstall, run this script again and choose 'Setup'"
     echo ""
 }
 
@@ -180,7 +287,8 @@ show_progress() {
     echo -e "] Done"
 }
 
-# Start wizard
+# Main setup function
+setup_platform() {
 print_banner
 
 print_step "System Requirements Check"
@@ -240,11 +348,11 @@ if [ -f ".env" ]; then
         # Detect platform architecture
         ARCH=$(uname -m)
         if [ "$ARCH" = "x86_64" ]; then
-            VERSION_TAG="v0.1.8-amd64"
+            VERSION_TAG="v0.1.13-amd64"
         elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            VERSION_TAG="v0.1.8-arm64"
+            VERSION_TAG="v0.1.13-arm64"
         else
-            VERSION_TAG="v0.1.8-amd64"
+            VERSION_TAG="v0.1.13-amd64"
         fi
 
         # Update versions in .env file
@@ -390,13 +498,13 @@ while true; do
     case $PLATFORM_CHOICE in
         1)
             PLATFORM_ARCH="amd64"
-            VERSION_TAG="v0.1.8-amd64"
+            VERSION_TAG="v0.1.13-amd64"
             print_success "Selected: Linux (AMD64)"
             break
             ;;
         2)
             PLATFORM_ARCH="arm64"
-            VERSION_TAG="v0.1.8-arm64"
+            VERSION_TAG="v0.1.13-arm64"
             print_success "Selected: Mac (ARM64)"
             break
             ;;
@@ -497,7 +605,7 @@ AMS_DB_NAME=ams_db
 # Security
 # ===================================
 SECRET_KEY=${SECRET_KEY}
-DEBUG=False
+DEBUG=True
 ALLOWED_HOSTS=*
 
 # ===================================
@@ -578,6 +686,17 @@ docker network rm platform_upsonic-network 2>/dev/null || true
 docker network rm upsonic-network 2>/dev/null || true
 
 print_success "Cleanup completed (volumes preserved)"
+
+# Create shared Docker network for Platform and Agents
+print_step "Network Setup"
+
+print_info "Creating shared Docker network..."
+if ! docker network inspect upsonic-network >/dev/null 2>&1; then
+    docker network create upsonic-network
+    print_success "Network 'upsonic-network' created"
+else
+    print_success "Network 'upsonic-network' already exists"
+fi
 
 # Summary
 print_step "Configuration Summary"
@@ -718,8 +837,14 @@ else
 EOF
     echo -e "${NC}"
 
+    # Construct URL with port
+    ACCESS_URL="${SERVER_BASE_ADDRESS}"
+    if [ "$PLATFORM_PORT" != "80" ] && [ "$PLATFORM_PORT" != "443" ]; then
+        ACCESS_URL="${SERVER_BASE_ADDRESS}:${PLATFORM_PORT}"
+    fi
+
     echo -e "${BOLD}Quick Start:${NC}"
-    echo -e "  1. Open: ${CYAN}${SERVER_BASE_ADDRESS}${NC}"
+    echo -e "  1. Open: ${CYAN}${ACCESS_URL}${NC}"
     echo -e "  2. Login with email: ${CYAN}${ADMIN_USERNAME}${NC}"
     echo -e "  3. Add your Git provider credentials in Settings"
     echo -e "  4. Deploy your first agent!"
@@ -737,3 +862,41 @@ fi
 
 print_info "${YELLOW}Note: It may take another minute for all services to fully initialize${NC}"
 echo ""
+}
+
+# Main menu
+show_menu() {
+    print_banner
+    echo -e "${BOLD}What would you like to do?${NC}"
+    echo ""
+    echo -e "  ${GREEN}1)${NC} Setup / Install Upsonic Platform"
+    echo -e "  ${RED}2)${NC} Delete / Uninstall Upsonic Platform"
+    echo -e "  ${BLUE}3)${NC} Exit"
+    echo ""
+    echo -n -e "${CYAN}Enter your choice [1-3]: ${NC}"
+    read -r choice
+
+    case $choice in
+        1)
+            setup_platform
+            ;;
+        2)
+            delete_platform
+            ;;
+        3)
+            echo ""
+            print_info "Goodbye!"
+            echo ""
+            exit 0
+            ;;
+        *)
+            echo ""
+            print_error "Invalid choice. Please select 1, 2, or 3."
+            sleep 2
+            show_menu
+            ;;
+    esac
+}
+
+# Start the wizard
+show_menu
