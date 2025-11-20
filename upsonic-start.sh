@@ -256,7 +256,8 @@ generate_uuid() {
 # Validate email
 validate_email() {
     local email=$1
-    if [[ $email =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    # More permissive regex - just check for basic email structure
+    if [[ $email =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
         return 0
     else
         return 1
