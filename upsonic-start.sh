@@ -112,13 +112,74 @@ delete_platform() {
         print_success "Agent containers removed"
     fi
 
-    # Remove volumes
+    # Remove volumes - comprehensive approach
     print_info "Removing volumes..."
-    docker volume rm platform_upsonic-db-data 2>/dev/null || true
-    docker volume rm platform_redis_data 2>/dev/null || true
-    docker volume rm platform_ams-db-data 2>/dev/null || true
-    docker volume rm platform_ams-repos-data 2>/dev/null || true
-    print_success "Volumes removed"
+
+    # First, get all volumes from containers (existing approach)
+    print_info "Finding volumes from container mounts..."
+    VOLUMES_FROM_CONTAINERS=""
+
+    # Get volumes from Upsonic containers
+    UPSONIC_CONTAINER_VOLUMES=$(docker ps -a --filter "name=upsonic" --format "{{.Names}}" 2>/dev/null | \
+        xargs -I {} docker inspect {} --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null | \
+        sort -u || true)
+
+    # Get volumes from AMS containers
+    AMS_CONTAINER_VOLUMES=$(docker ps -a --filter "name=ams" --format "{{.Names}}" 2>/dev/null | \
+        xargs -I {} docker inspect {} --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null | \
+        sort -u || true)
+
+    # Combine container volumes
+    VOLUMES_FROM_CONTAINERS="$UPSONIC_CONTAINER_VOLUMES"$'\n'"$AMS_CONTAINER_VOLUMES"
+
+    # Now find ALL volumes with relevant patterns
+    print_info "Finding all platform-related volumes..."
+
+    # Get all volumes and filter by patterns - check both prefix and suffix
+    # Prefix patterns: upsonic, ams, agentos, platform_, agent-
+    # Suffix patterns: -media-data-prod, -postgres-data-prod, -redis-data-prod, -static-data-prod
+    #                  _redis_data, _upsonic-db-data, _ams-db-data, _ams-repos-data
+    ALL_PLATFORM_VOLUMES=$(docker volume ls --format "{{.Name}}" | \
+        grep -E "(^(upsonic|ams|agentos|platform_|agent-)|-media-data-prod$|-postgres-data-prod$|-redis-data-prod$|-static-data-prod$|_redis_data$|_upsonic-db-data$|_ams-db-data$|_ams-repos-data$)" || true)
+
+    # Combine all volumes (remove duplicates)
+    ALL_VOLUMES=$(echo -e "$VOLUMES_FROM_CONTAINERS\n$ALL_PLATFORM_VOLUMES" | \
+        grep -v '^$' | sort -u || true)
+
+    # Count volumes
+    VOLUME_COUNT=$(echo "$ALL_VOLUMES" | grep -v '^$' | wc -l || echo "0")
+
+    if [ "$VOLUME_COUNT" -gt 0 ]; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}Found $VOLUME_COUNT volume(s) to remove:${NC}"
+        echo ""
+        echo "$ALL_VOLUMES" | grep -v '^$' | while read volume; do
+            if [ -n "$volume" ]; then
+                # Show volume size if possible
+                VOLUME_SIZE=$(docker volume inspect "$volume" --format '{{.Mountpoint}}' 2>/dev/null | xargs du -sh 2>/dev/null | cut -f1 || echo "unknown")
+                echo -e "  ${RED}•${NC} $volume (size: $VOLUME_SIZE)"
+            fi
+        done
+        echo ""
+
+        if confirm "Remove all these volumes? ${RED}(THIS WILL DELETE ALL DATA)${NC}" "n"; then
+            echo "$ALL_VOLUMES" | grep -v '^$' | while read volume; do
+                if [ -n "$volume" ]; then
+                    print_info "Removing volume: $volume"
+                    if docker volume rm "$volume" 2>/dev/null; then
+                        print_success "Removed: $volume"
+                    else
+                        print_warning "Could not remove $volume (may be in use)"
+                    fi
+                fi
+            done
+            print_success "Volume cleanup completed"
+        else
+            print_info "Skipping volume removal"
+        fi
+    else
+        print_info "No volumes found to remove"
+    fi
 
     # Remove networks
     print_info "Removing networks..."
@@ -342,6 +403,7 @@ if [ -f ".env" ]; then
     if confirm "Do you want to use existing configuration?" "y"; then
         print_success "Using existing .env configuration"
         print_info "Skipping configuration wizard..."
+        print_warning "Database passwords and credentials will be preserved"
 
         # Update version numbers in existing .env
         print_info "Updating image versions to latest..."
@@ -349,18 +411,20 @@ if [ -f ".env" ]; then
         # Detect platform architecture
         ARCH=$(uname -m)
         if [ "$ARCH" = "x86_64" ]; then
-            VERSION_TAG="v0.1.15-amd64"
+            VERSION_TAG="v0.1.17-amd64"
         elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            VERSION_TAG="v0.1.15-arm64"
+            VERSION_TAG="v0.1.17-arm64"
         else
-            VERSION_TAG="v0.1.15-amd64"
+            VERSION_TAG="v0.1.17-amd64"
         fi
 
-        # Update versions in .env file
+        # Update ONLY version numbers, preserve all other settings including passwords
         sed -i.bak "s/PLATFORM_VERSION=.*/PLATFORM_VERSION=${VERSION_TAG}/" .env
         sed -i.bak "s/AMS_VERSION=.*/AMS_VERSION=${VERSION_TAG}/" .env
+        rm -f .env.bak
 
         print_success "Updated to version ${VERSION_TAG}"
+        print_info "All existing credentials and settings preserved"
 
         # Skip to deployment
         print_step "Starting Deployment"
@@ -499,13 +563,13 @@ while true; do
     case $PLATFORM_CHOICE in
         1)
             PLATFORM_ARCH="amd64"
-            VERSION_TAG="v0.1.15-amd64"
+            VERSION_TAG="v0.1.17-amd64"
             print_success "Selected: Linux (AMD64)"
             break
             ;;
         2)
             PLATFORM_ARCH="arm64"
-            VERSION_TAG="v0.1.15-arm64"
+            VERSION_TAG="v0.1.17-arm64"
             print_success "Selected: Mac (ARM64)"
             break
             ;;
