@@ -412,11 +412,11 @@ if [ -f ".env" ]; then
         # Detect platform architecture
         ARCH=$(uname -m)
         if [ "$ARCH" = "x86_64" ]; then
-            VERSION_TAG="v0.1.17-amd64"
+            VERSION_TAG="v0.1.18-amd64"
         elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            VERSION_TAG="v0.1.17-arm64"
+            VERSION_TAG="v0.1.18-arm64"
         else
-            VERSION_TAG="v0.1.17-amd64"
+            VERSION_TAG="v0.1.18-amd64"
         fi
 
         # Update ONLY version numbers, preserve all other settings including passwords
@@ -564,13 +564,13 @@ while true; do
     case $PLATFORM_CHOICE in
         1)
             PLATFORM_ARCH="amd64"
-            VERSION_TAG="v0.1.17-amd64"
+            VERSION_TAG="v0.1.18-amd64"
             print_success "Selected: Linux (AMD64)"
             break
             ;;
         2)
             PLATFORM_ARCH="arm64"
-            VERSION_TAG="v0.1.17-arm64"
+            VERSION_TAG="v0.1.18-arm64"
             print_success "Selected: Mac (ARM64)"
             break
             ;;
