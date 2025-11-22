@@ -930,6 +930,301 @@ print_info "${YELLOW}Note: It may take another minute for all services to fully 
 echo ""
 }
 
+# Debug: Import SSH Key
+debug_import_ssh_key() {
+    print_step "Import SSH Key"
+
+    echo -e "${INFO} This will import your SSH private key into the AMS container."
+    echo -e "${INFO} The key will be used for Git operations with SSH authentication."
+    echo ""
+
+    # Check if AMS container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        print_info "Please run Setup first, then import SSH key."
+        return 1
+    fi
+
+    echo -e "${YELLOW}Paste your SSH private key below.${NC}"
+    echo -e "${YELLOW}When done, type 'END' on a new line and press Enter:${NC}"
+    echo ""
+
+    SSH_KEY=""
+    while IFS= read -r line; do
+        if [ "$line" = "END" ]; then
+            break
+        fi
+        SSH_KEY="${SSH_KEY}${line}"$'\n'
+    done
+
+    if [ -z "$SSH_KEY" ]; then
+        print_error "No SSH key provided!"
+        return 1
+    fi
+
+    # Create .ssh directory in container
+    docker exec ams-project mkdir -p /root/.ssh
+    docker exec ams-project chmod 700 /root/.ssh
+
+    # Write SSH key to container
+    echo "$SSH_KEY" | docker exec -i ams-project tee /root/.ssh/id_rsa > /dev/null
+    docker exec ams-project chmod 600 /root/.ssh/id_rsa
+
+    print_success "SSH private key imported!"
+
+    # Ask for Git server hostname
+    echo ""
+    read_with_default "Git server hostname (e.g., github.com or fibakod.fibabanka.com.tr)" "" GIT_HOST
+
+    if [ -n "$GIT_HOST" ]; then
+        # Add to known_hosts (skip host key verification for this host)
+        docker exec ams-project bash -c "ssh-keyscan -H $GIT_HOST >> /root/.ssh/known_hosts 2>/dev/null || true"
+
+        # Create SSH config for this host
+        docker exec ams-project bash -c "cat >> /root/.ssh/config << EOF
+Host $GIT_HOST
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    IdentityFile /root/.ssh/id_rsa
+EOF"
+        docker exec ams-project chmod 600 /root/.ssh/config
+
+        print_success "SSH config created for $GIT_HOST"
+    fi
+
+    print_success "SSH setup complete!"
+    echo ""
+}
+
+# Debug: Test Git Clone SSH
+debug_test_git_clone_ssh() {
+    print_step "Test Git Clone (SSH)"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    echo -e "${INFO} Enter the SSH Git URL to test clone."
+    echo -e "${INFO} Format: git@hostname:org/repo.git"
+    echo -e "${INFO} Azure DevOps: git@hostname:v3/org/project/repo"
+    echo ""
+
+    read_with_default "SSH Git URL" "" GIT_SSH_URL
+
+    if [ -z "$GIT_SSH_URL" ]; then
+        print_error "No URL provided!"
+        return 1
+    fi
+
+    echo ""
+    print_info "Testing SSH clone..."
+    echo ""
+
+    # Create temp directory and test clone
+    TEST_RESULT=$(docker exec ams-project bash -c "
+        rm -rf /tmp/ssh_clone_test
+        mkdir -p /tmp/ssh_clone_test
+        cd /tmp/ssh_clone_test
+        GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/id_rsa' git clone --depth 1 '$GIT_SSH_URL' test_repo 2>&1
+        echo \"EXIT_CODE=\$?\"
+    " 2>&1)
+
+    echo "$TEST_RESULT"
+    echo ""
+
+    if echo "$TEST_RESULT" | grep -q "EXIT_CODE=0"; then
+        print_success "SSH Git clone successful!"
+        docker exec ams-project rm -rf /tmp/ssh_clone_test
+    else
+        print_error "SSH Git clone failed!"
+        print_info "Check the error message above."
+    fi
+    echo ""
+}
+
+# Debug: Test Git Clone HTTPS
+debug_test_git_clone_https() {
+    print_step "Test Git Clone (HTTPS)"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    echo -e "${INFO} Enter the HTTPS Git URL to test clone."
+    echo -e "${INFO} Format: https://hostname/org/repo.git"
+    echo -e "${INFO} With token: https://TOKEN@hostname/org/repo.git"
+    echo ""
+
+    read_with_default "HTTPS Git URL" "" GIT_HTTPS_URL
+
+    if [ -z "$GIT_HTTPS_URL" ]; then
+        print_error "No URL provided!"
+        return 1
+    fi
+
+    echo ""
+    print_info "Testing HTTPS clone..."
+    echo ""
+
+    TEST_RESULT=$(docker exec ams-project bash -c "
+        rm -rf /tmp/https_clone_test
+        mkdir -p /tmp/https_clone_test
+        cd /tmp/https_clone_test
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 '$GIT_HTTPS_URL' test_repo 2>&1
+        echo \"EXIT_CODE=\$?\"
+    " 2>&1)
+
+    echo "$TEST_RESULT"
+    echo ""
+
+    if echo "$TEST_RESULT" | grep -q "EXIT_CODE=0"; then
+        print_success "HTTPS Git clone successful!"
+        docker exec ams-project rm -rf /tmp/https_clone_test
+    else
+        print_error "HTTPS Git clone failed!"
+        print_info "Check the error message above."
+    fi
+    echo ""
+}
+
+# Debug: Network Test
+debug_network_test() {
+    print_step "Network & DNS Test"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    read_with_default "Hostname to test (e.g., github.com or fibakod.fibabanka.com.tr)" "github.com" TEST_HOST
+
+    echo ""
+    print_info "Testing connectivity to $TEST_HOST..."
+    echo ""
+
+    # DNS Resolution
+    echo -e "${BOLD}DNS Resolution:${NC}"
+    docker exec ams-project bash -c "nslookup $TEST_HOST 2>&1 || echo 'DNS lookup failed'"
+    echo ""
+
+    # Ping test
+    echo -e "${BOLD}Ping Test:${NC}"
+    docker exec ams-project bash -c "ping -c 3 $TEST_HOST 2>&1 || echo 'Ping failed (may be blocked)'"
+    echo ""
+
+    # Port test (SSH - 22)
+    echo -e "${BOLD}SSH Port (22) Test:${NC}"
+    docker exec ams-project bash -c "timeout 5 bash -c '</dev/tcp/$TEST_HOST/22' 2>&1 && echo 'Port 22 is OPEN' || echo 'Port 22 is CLOSED or unreachable'"
+    echo ""
+
+    # Port test (HTTPS - 443)
+    echo -e "${BOLD}HTTPS Port (443) Test:${NC}"
+    docker exec ams-project bash -c "timeout 5 bash -c '</dev/tcp/$TEST_HOST/443' 2>&1 && echo 'Port 443 is OPEN' || echo 'Port 443 is CLOSED or unreachable'"
+    echo ""
+
+    # Curl test
+    echo -e "${BOLD}HTTPS Connection Test:${NC}"
+    docker exec ams-project bash -c "curl -sI --connect-timeout 10 https://$TEST_HOST 2>&1 | head -5 || echo 'HTTPS connection failed'"
+    echo ""
+}
+
+# Debug: Open AMS Shell
+debug_ams_shell() {
+    print_step "Opening AMS Container Shell"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    print_info "Opening interactive shell in AMS container..."
+    print_info "Type 'exit' to return to this menu."
+    echo ""
+
+    docker exec -it ams-project /bin/bash
+    echo ""
+}
+
+# Debug: View AMS Logs
+debug_view_logs() {
+    print_step "AMS Container Logs"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    print_info "Showing last 50 lines of AMS logs (Ctrl+C to exit)..."
+    echo ""
+
+    docker logs --tail 50 -f ams-project
+}
+
+# Debug: Check SSH Key Status
+debug_ssh_status() {
+    print_step "SSH Key Status"
+
+    if ! docker ps --format '{{.Names}}' | grep -q "ams-project"; then
+        print_error "AMS container is not running!"
+        return 1
+    fi
+
+    echo -e "${BOLD}SSH Key Files:${NC}"
+    docker exec ams-project bash -c "ls -la /root/.ssh/ 2>/dev/null || echo 'No .ssh directory found'"
+    echo ""
+
+    echo -e "${BOLD}SSH Key Fingerprint:${NC}"
+    docker exec ams-project bash -c "ssh-keygen -lf /root/.ssh/id_rsa 2>/dev/null || echo 'No SSH key found'"
+    echo ""
+
+    echo -e "${BOLD}SSH Config:${NC}"
+    docker exec ams-project bash -c "cat /root/.ssh/config 2>/dev/null || echo 'No SSH config found'"
+    echo ""
+}
+
+# Debug menu
+debug_menu() {
+    while true; do
+        print_banner
+        echo -e "${BOLD}${MAGENTA}Debug & Test Menu${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "  ${GREEN}1)${NC} Import SSH Key"
+        echo -e "  ${GREEN}2)${NC} Check SSH Key Status"
+        echo -e "  ${CYAN}3)${NC} Test Git Clone (SSH)"
+        echo -e "  ${CYAN}4)${NC} Test Git Clone (HTTPS)"
+        echo -e "  ${YELLOW}5)${NC} Network & DNS Test"
+        echo -e "  ${BLUE}6)${NC} Open AMS Shell"
+        echo -e "  ${BLUE}7)${NC} View AMS Logs"
+        echo -e "  ${RED}8)${NC} Back to Main Menu"
+        echo ""
+        echo -n -e "${CYAN}Enter your choice [1-8]: ${NC}"
+        read -r debug_choice
+
+        case $debug_choice in
+            1) debug_import_ssh_key ;;
+            2) debug_ssh_status ;;
+            3) debug_test_git_clone_ssh ;;
+            4) debug_test_git_clone_https ;;
+            5) debug_network_test ;;
+            6) debug_ams_shell ;;
+            7) debug_view_logs ;;
+            8) return ;;
+            *)
+                print_error "Invalid choice. Please select 1-8."
+                sleep 1
+                ;;
+        esac
+
+        if [ "$debug_choice" != "6" ] && [ "$debug_choice" != "7" ] && [ "$debug_choice" != "8" ]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
+    done
+}
+
 # Main menu
 show_menu() {
     print_banner
@@ -937,9 +1232,10 @@ show_menu() {
     echo ""
     echo -e "  ${GREEN}1)${NC} Setup / Install Upsonic Platform"
     echo -e "  ${RED}2)${NC} Delete / Uninstall Upsonic Platform"
-    echo -e "  ${BLUE}3)${NC} Exit"
+    echo -e "  ${YELLOW}3)${NC} Debug / Test Mode"
+    echo -e "  ${BLUE}4)${NC} Exit"
     echo ""
-    echo -n -e "${CYAN}Enter your choice [1-3]: ${NC}"
+    echo -n -e "${CYAN}Enter your choice [1-4]: ${NC}"
     read -r choice
 
     case $choice in
@@ -950,6 +1246,10 @@ show_menu() {
             delete_platform
             ;;
         3)
+            debug_menu
+            show_menu
+            ;;
+        4)
             echo ""
             print_info "Goodbye!"
             echo ""
@@ -957,7 +1257,7 @@ show_menu() {
             ;;
         *)
             echo ""
-            print_error "Invalid choice. Please select 1, 2, or 3."
+            print_error "Invalid choice. Please select 1, 2, 3, or 4."
             sleep 2
             show_menu
             ;;

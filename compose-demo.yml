@@ -113,6 +113,7 @@ services:
       - AMS_BEARER_TOKEN=${AMS_BEARER_TOKEN:-platform_default}
       - PLATFORM_BEARER_TOKEN=${PLATFORM_BEARER_TOKEN:-platform_default}
       - REGISTRY_STRATEGY=${REGISTRY_STRATEGY:-docker_compose}
+      - GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/id_rsa
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ams-repos-data:/app/ams_project/repos
