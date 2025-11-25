@@ -15,6 +15,7 @@ services:
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
     volumes:
       - upsonic-db-data:/db
+      - platform-temp-data:/app/platform/temp
     restart: unless-stopped
     networks:
       - upsonic-network
@@ -171,6 +172,7 @@ services:
       - DEBUG=False
     volumes:
       - upsonic-db-data:/db
+      - platform-temp-data:/app/platform/temp
     restart: unless-stopped
     networks:
       - upsonic-network
@@ -241,4 +243,6 @@ volumes:
   ams-db-data:
     driver: local
   ams-repos-data:
+    driver: local
+  platform-temp-data:
     driver: local
