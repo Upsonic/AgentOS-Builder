@@ -2,7 +2,7 @@
 set -e
 
 # Version Configuration
-VERSION_NUMBER="0.1.20"
+VERSION_NUMBER="0.1.21"
 
 # Colors for beautiful output
 RED='\033[0;31m'
@@ -74,20 +74,35 @@ delete_platform() {
 
     print_step "Deleting Upsonic Platform"
 
-    # Find agent containers
+    # Find agent containers - check multiple patterns
     print_info "Finding deployed agent containers..."
-    AGENT_CONTAINERS=$(docker ps -a --filter "name=upsonic-" --format "{{.Names}}" | grep -v -E "upsonic-api|upsonic-db|upsonic-redis|upsonic-celery|ams-project|ams-db" || true)
+
+    # Pattern 1: upsonic-* (excluding platform containers)
+    UPSONIC_AGENT_CONTAINERS=$(docker ps -a --filter "name=upsonic-" --format "{{.Names}}" | grep -v -E "upsonic-api|upsonic-db|upsonic-redis|upsonic-celery" || true)
+
+    # Pattern 2: agent-* (actual agent deployments)
+    AGENT_PREFIX_CONTAINERS=$(docker ps -a --filter "name=agent-" --format "{{.Names}}" || true)
+
+    # Pattern 3: ams-project and ams-db (but keep for later with platform)
+    # We'll handle ams containers separately with platform containers
+
+    # Combine all agent containers (remove duplicates)
+    AGENT_CONTAINERS=$(echo -e "${UPSONIC_AGENT_CONTAINERS}\n${AGENT_PREFIX_CONTAINERS}" | grep -v '^$' | sort -u || true)
 
     if [ -n "$AGENT_CONTAINERS" ]; then
         echo ""
-        echo -e "${YELLOW}${BOLD}The following agent containers will be deleted:${NC}"
+        echo -e "${YELLOW}${BOLD}The following agent containers will be stopped and deleted:${NC}"
         echo ""
         echo "$AGENT_CONTAINERS" | while read container; do
-            echo -e "  ${RED}•${NC} $container"
+            if [ -n "$container" ]; then
+                # Show container status
+                STATUS=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "unknown")
+                echo -e "  ${RED}•${NC} $container ${YELLOW}(status: $STATUS)${NC}"
+            fi
         done
         echo ""
 
-        if ! confirm "Delete these agent containers?" "y"; then
+        if ! confirm "Stop and delete these agent containers?" "y"; then
             print_info "Skipping agent containers deletion"
             AGENT_CONTAINERS=""
         fi
@@ -95,22 +110,32 @@ delete_platform() {
         print_info "No agent containers found"
     fi
 
-    # Stop and remove Platform containers
-    print_info "Stopping Platform containers..."
+    # Stop and remove Platform containers FIRST
+    print_info "Stopping and removing Platform containers..."
     if [ -f "compose-demo.yml" ]; then
-        docker compose -f compose-demo.yml down --remove-orphans 2>/dev/null || true
+        docker compose -f compose-demo.yml down --remove-orphans --volumes --rmi local 2>/dev/null || true
     fi
     if [ -f "docker-compose.yml" ]; then
-        docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null || true
+        docker compose -f docker-compose.yml down --remove-orphans --volumes --rmi local 2>/dev/null || true
     fi
-    print_success "Platform containers stopped"
 
-    # Stop and remove agent containers
+    # Also remove any stopped containers with platform names
+    docker rm -f $(docker ps -aq --filter "name=upsonic-") 2>/dev/null || true
+    docker rm -f $(docker ps -aq --filter "name=ams-") 2>/dev/null || true
+
+    print_success "Platform containers stopped and removed"
+
+    # Stop and remove agent containers with force
     if [ -n "$AGENT_CONTAINERS" ]; then
         print_info "Stopping and removing agent containers..."
         echo "$AGENT_CONTAINERS" | while read container; do
-            docker stop "$container" 2>/dev/null || true
-            docker rm "$container" 2>/dev/null || true
+            if [ -n "$container" ]; then
+                # Force stop with timeout
+                print_info "Stopping: $container"
+                docker stop -t 10 "$container" 2>/dev/null || true
+                # Force remove container
+                docker rm -f "$container" 2>/dev/null || true
+            fi
         done
         print_success "Agent containers removed"
     fi
@@ -444,23 +469,36 @@ if [ -f ".env" ]; then
         print_info "Stopping existing containers..."
         docker compose -f "$COMPOSE_FILE" down --remove-orphans
 
-        print_info "Pulling latest Docker images..."
-        echo -e "${INFO} This may take several minutes depending on your connection..."
+        # Remove any stopped containers to avoid conflicts
+        docker rm -f $(docker ps -aq --filter "name=upsonic-") 2>/dev/null || true
+        docker rm -f $(docker ps -aq --filter "name=ams-") 2>/dev/null || true
+
+        print_info "Starting services with latest images (force recreate and pull)..."
+        echo -e "${INFO} This will pull fresh images and recreate all containers..."
         echo ""
 
-        if docker compose -f "$COMPOSE_FILE" pull --ignore-pull-failures || true; then
-            print_success "Images pull attempted"
-        fi
-
-        print_info "Starting services with latest images (force recreate)..."
-        docker compose -f "$COMPOSE_FILE" up -d --force-recreate --pull always --remove-orphans
+        # --pull always: Always pull latest images from registry (bypass cache)
+        # --force-recreate: Recreate containers even if config hasn't changed
+        # --remove-orphans: Remove containers for services not in compose file
+        docker compose -f "$COMPOSE_FILE" up -d --pull always --force-recreate --remove-orphans
 
         print_step "Deployment Complete"
+
+        # Load .env variables to construct URL
+        if [ -f ".env" ]; then
+            source .env
+        fi
+
+        # Construct access URL with port
+        ACCESS_URL="${SERVER_BASE_ADDRESS}"
+        if [ "$PLATFORM_PORT" != "80" ] && [ "$PLATFORM_PORT" != "443" ]; then
+            ACCESS_URL="${SERVER_BASE_ADDRESS}:${PLATFORM_PORT}"
+        fi
 
         echo ""
         print_success "Upsonic Platform is starting up!"
         echo ""
-        print_info "Access the platform at: ${CYAN}${BOLD}http://localhost${NC}"
+        print_info "Access the platform at: ${CYAN}${BOLD}${ACCESS_URL}${NC}"
         print_info "It may take 1-2 minutes for all services to be ready"
         echo ""
 
@@ -748,6 +786,10 @@ print_step "Cleaning Up Old Resources"
 print_info "Cleaning up any existing containers..."
 docker compose -f compose-local.yml down --remove-orphans 2>/dev/null || true
 docker compose -f compose-demo.yml down --remove-orphans 2>/dev/null || true
+
+# Remove any stopped containers to avoid conflicts
+docker rm -f $(docker ps -aq --filter "name=upsonic-") 2>/dev/null || true
+docker rm -f $(docker ps -aq --filter "name=ams-") 2>/dev/null || true
 
 print_info "Removing old networks..."
 docker network rm platform_upsonic-network-local 2>/dev/null || true
