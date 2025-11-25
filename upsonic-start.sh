@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Version Configuration
+VERSION_NUMBER="0.1.20"
+
 # Colors for beautiful output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -412,11 +415,11 @@ if [ -f ".env" ]; then
         # Detect platform architecture
         ARCH=$(uname -m)
         if [ "$ARCH" = "x86_64" ]; then
-            VERSION_TAG="v0.1.19-amd64"
+            VERSION_TAG="v${VERSION_NUMBER}-amd64"
         elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            VERSION_TAG="v0.1.19-arm64"
+            VERSION_TAG="v${VERSION_NUMBER}-arm64"
         else
-            VERSION_TAG="v0.1.19-amd64"
+            VERSION_TAG="v${VERSION_NUMBER}-amd64"
         fi
 
         # Update ONLY version numbers, preserve all other settings including passwords
@@ -564,13 +567,13 @@ while true; do
     case $PLATFORM_CHOICE in
         1)
             PLATFORM_ARCH="amd64"
-            VERSION_TAG="v0.1.19-amd64"
+            VERSION_TAG="v${VERSION_NUMBER}-amd64"
             print_success "Selected: Linux (AMD64)"
             break
             ;;
         2)
             PLATFORM_ARCH="arm64"
-            VERSION_TAG="v0.1.19-arm64"
+            VERSION_TAG="v${VERSION_NUMBER}-arm64"
             print_success "Selected: Mac (ARM64)"
             break
             ;;
