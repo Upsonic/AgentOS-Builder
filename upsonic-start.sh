@@ -2,7 +2,7 @@
 set -e
 
 # Version Configuration
-VERSION_NUMBER="0.1.26"
+VERSION_NUMBER="0.1.27"
 
 # Colors for beautiful output
 RED='\033[0;31m'
@@ -807,6 +807,36 @@ if ! docker network inspect upsonic-network >/dev/null 2>&1; then
     print_success "Network 'upsonic-network' created"
 else
     print_success "Network 'upsonic-network' already exists"
+fi
+
+print_info "Setting up k3d cluster..."
+if command_exists k3d; then
+    if k3d cluster list 2>/dev/null | grep -q "mycluster"; then
+        print_success "k3d cluster 'mycluster' already exists"
+
+        if ! k3d cluster list 2>/dev/null | grep "mycluster" | grep -q "running"; then
+            print_info "Starting k3d cluster 'mycluster'..."
+            k3d cluster start mycluster
+            print_success "k3d cluster started"
+        fi
+    else
+        print_info "Creating k3d cluster 'mycluster'..."
+        if k3d cluster create mycluster \
+            --api-port 6550 \
+            -p "8081:80@loadbalancer" \
+            --network k3d-mycluster 2>/dev/null; then
+            print_success "k3d cluster created successfully"
+        else
+            print_warning "k3d cluster creation failed (may already exist)"
+        fi
+    fi
+
+    if docker network inspect k3d-mycluster >/dev/null 2>&1; then
+        print_success "k3d network 'k3d-mycluster' is ready"
+    fi
+else
+    print_warning "k3d not installed - skipping cluster creation"
+    print_info "Install k3d: ${CYAN}https://k3d.io/v5.6.0/#installation${NC}"
 fi
 
 # Summary
