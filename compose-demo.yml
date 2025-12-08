@@ -1,0 +1,257 @@
+# Upsonic Platform - Customer Demo Deployment
+# This compose file uses pre-built images from DockerHub
+# All services are optimized for production use
+
+services:
+  upsonic-api:
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    container_name: upsonic-api
+    ports:
+      - "${PLATFORM_PORT:-8000}:7330"
+    env_file:
+      - ./.env
+    environment:
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+    volumes:
+      - upsonic-db-data:/db
+      - platform-temp-data:/app/platform/temp
+    restart: unless-stopped
+    networks:
+      - upsonic-network
+    depends_on:
+      upsonic-db:
+        condition: service_healthy
+      ams-project:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health/", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  upsonic-db:
+    image: postgres:16-alpine
+    container_name: upsonic-db
+    env_file:
+      - ./.env
+    expose:
+      - "5432"
+    volumes:
+      - upsonic-db-data:/var/lib/postgresql/data
+    networks:
+      - upsonic-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-upsonic}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  ams-db:
+    image: postgres:16-alpine
+    container_name: ams-db
+    environment:
+      - POSTGRES_USER=${AMS_DB_USER:-ams_user}
+      - POSTGRES_PASSWORD=${AMS_DB_PASSWORD:-ChangeThisPassword123!}
+      - POSTGRES_DB=${AMS_DB_NAME:-ams_db}
+    expose:
+      - "5432"
+    volumes:
+      - ams-db-data:/var/lib/postgresql/data
+    networks:
+      - upsonic-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AMS_DB_USER:-ams_user} -d ${AMS_DB_NAME:-ams_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  ams-project:
+    image: ${DOCKER_REGISTRY:-getupsonic}/ams:${AMS_VERSION:-v0.1.28-arm64}
+    container_name: ams-project
+    ports:
+      - "7329:7329"
+    environment:
+      - POSTGRES_HOST=ams-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${AMS_DB_USER:-ams_user}
+      - POSTGRES_PASSWORD=${AMS_DB_PASSWORD:-ChangeThisPassword123!}
+      - POSTGRES_DB=${AMS_DB_NAME:-ams_db}
+      - REPOS_DIR=/app/ams_project/repos
+      - AMS_BEARER_TOKEN=${AMS_BEARER_TOKEN:-platform_default}
+      - PLATFORM_BEARER_TOKEN=${PLATFORM_BEARER_TOKEN:-platform_default}
+      - REGISTRY_STRATEGY=${REGISTRY_STRATEGY:-docker_compose}
+      - GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/id_rsa
+      - USE_CUSTOM_REGISTRY=${USE_CUSTOM_REGISTRY:-false}
+      - DOCKER_REGISTRY_PREFIX=${DOCKER_REGISTRY_PREFIX:-}
+      - APT_CUSTOM_SOURCES=${APT_CUSTOM_SOURCES:-false}
+      - PIP_CUSTOM_CONFIG=${PIP_CUSTOM_CONFIG:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ams-repos-data:/app/ams_project/repos
+      - ./platform-registry-config:/app/platform-registry-config:ro
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - upsonic-network
+    depends_on:
+      ams-db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  redis:
+    image: redis:8-alpine
+    container_name: upsonic-redis
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - upsonic-network
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--auto-aof-rewrite-percentage", "100", "--auto-aof-rewrite-min-size", "64mb", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  celery-worker:
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    container_name: upsonic-celery-worker
+    env_file:
+      - ./.env
+    environment:
+      - DEBUG=False
+    volumes:
+      - upsonic-db-data:/db
+      - platform-temp-data:/app/platform/temp
+    restart: unless-stopped
+    networks:
+      - upsonic-network
+    depends_on:
+      upsonic-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      upsonic-api:
+        condition: service_started
+    working_dir: /app/platform
+    command: ["/bin/bash", "-c", "DJANGO_SETTINGS_MODULE=platform_base.settings ../.venv/bin/celery -A platform_base worker --loglevel=info --concurrency=4"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  celery-beat:
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    container_name: upsonic-celery-beat
+    env_file:
+      - ./.env
+    environment:
+      - DEBUG=False
+    volumes:
+      - upsonic-db-data:/db
+    restart: unless-stopped
+    networks:
+      - upsonic-network
+    depends_on:
+      upsonic-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      upsonic-api:
+        condition: service_started
+      celery-worker:
+        condition: service_started
+    working_dir: /app/platform
+    command: ["/bin/bash", "-c", "DJANGO_SETTINGS_MODULE=platform_base.settings ../.venv/bin/celery -A platform_base beat --loglevel=info --scheduler=django_celery_beat.schedulers:DatabaseScheduler"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+
+networks:
+  upsonic-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${UPSONIC_SUBNET:-10.99.0.0/24}
+          gateway: ${UPSONIC_GATEWAY:-10.99.0.1}
+
+volumes:
+  upsonic-db-data:
+    driver: local
+  redis_data:
+    driver: local
+  ams-db-data:
+    driver: local
+  ams-repos-data:
+    driver: local
+  platform-temp-data:
+    driver: local
