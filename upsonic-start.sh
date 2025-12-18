@@ -2,7 +2,7 @@
 set -e
 
 # Version Configuration
-VERSION_NUMBER="0.1.28"
+VERSION_NUMBER="0.1.30"
 
 # Colors for beautiful output
 RED='\033[0;31m'

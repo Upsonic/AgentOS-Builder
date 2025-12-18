@@ -4,7 +4,7 @@
 
 services:
   upsonic-api:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
     container_name: upsonic-api
     ports:
       - "${PLATFORM_PORT:-8000}:7330"
@@ -100,7 +100,7 @@ services:
           memory: 256M
 
   ams-project:
-    image: ${DOCKER_REGISTRY:-getupsonic}/ams:${AMS_VERSION:-v0.1.28-arm64}
+    image: ${DOCKER_REGISTRY:-getupsonic}/ams:${AMS_VERSION:-v0.1.30-arm64}
     container_name: ams-project
     ports:
       - "7329:7329"
@@ -169,7 +169,7 @@ services:
           memory: 128M
 
   celery-worker:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
     container_name: upsonic-celery-worker
     env_file:
       - ./.env
@@ -202,7 +202,7 @@ services:
           memory: 512M
 
   celery-beat:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.28-arm64}
+    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
     container_name: upsonic-celery-beat
     env_file:
       - ./.env
