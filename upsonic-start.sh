@@ -2,7 +2,7 @@
 set -e
 
 # Version Configuration
-VERSION_NUMBER="0.1.30"
+VERSION_NUMBER="0.1.37"
 
 # Colors for beautiful output
 RED='\033[0;31m'
@@ -1083,7 +1083,7 @@ print_info ""
 print_info "${BOLD}Docker Registry Configuration${NC}"
 echo ""
 
-read_with_default "Docker Registry" "getupsonic" DOCKER_REGISTRY
+read_with_default "Docker Registry" "upsonic" DOCKER_REGISTRY
 
 # Custom Registry / Proxy Configuration (Air-Gapped / Enterprise)
 print_info ""

@@ -4,7 +4,7 @@
 
 services:
   upsonic-api:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
+    image: ${DOCKER_REGISTRY_PREFIX:-}${DOCKER_REGISTRY:-upsonic}/agentos:${PLATFORM_VERSION:-v0.1.37-arm64}
     container_name: upsonic-api
     ports:
       - "${PLATFORM_PORT:-8000}:7330"
@@ -100,7 +100,7 @@ services:
           memory: 256M
 
   ams-project:
-    image: ${DOCKER_REGISTRY:-getupsonic}/ams:${AMS_VERSION:-v0.1.30-arm64}
+    image: ${DOCKER_REGISTRY_PREFIX:-}${DOCKER_REGISTRY:-upsonic}/ams:${AMS_VERSION:-v0.1.37-arm64}
     container_name: ams-project
     ports:
       - "7329:7329"
@@ -110,7 +110,7 @@ services:
       - POSTGRES_USER=${AMS_DB_USER:-ams_user}
       - POSTGRES_PASSWORD=${AMS_DB_PASSWORD:-ChangeThisPassword123!}
       - POSTGRES_DB=${AMS_DB_NAME:-ams_db}
-      - REPOS_DIR=/app/ams_project/repos
+      - REPOS_DIR=${REPOS_DIR:-/app/repos}
       - AMS_BEARER_TOKEN=${AMS_BEARER_TOKEN:-platform_default}
       - PLATFORM_BEARER_TOKEN=${PLATFORM_BEARER_TOKEN:-platform_default}
       - REGISTRY_STRATEGY=${REGISTRY_STRATEGY:-docker_compose}
@@ -121,7 +121,7 @@ services:
       - PIP_CUSTOM_CONFIG=${PIP_CUSTOM_CONFIG:-false}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ams-repos-data:/app/ams_project/repos
+      - ams-repos-data:/app/repos
       - ./platform-registry-config:/app/platform-registry-config:ro
     restart: unless-stopped
     privileged: true
@@ -169,7 +169,7 @@ services:
           memory: 128M
 
   celery-worker:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
+    image: ${DOCKER_REGISTRY_PREFIX:-}${DOCKER_REGISTRY:-upsonic}/agentos:${PLATFORM_VERSION:-v0.1.37-arm64}
     container_name: upsonic-celery-worker
     env_file:
       - ./.env
@@ -202,7 +202,7 @@ services:
           memory: 512M
 
   celery-beat:
-    image: ${DOCKER_REGISTRY:-getupsonic}/agentos:${PLATFORM_VERSION:-v0.1.30-arm64}
+    image: ${DOCKER_REGISTRY_PREFIX:-}${DOCKER_REGISTRY:-upsonic}/agentos:${PLATFORM_VERSION:-v0.1.37-arm64}
     container_name: upsonic-celery-beat
     env_file:
       - ./.env
